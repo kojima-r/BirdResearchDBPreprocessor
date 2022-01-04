@@ -21,6 +21,7 @@ cd BirdResearchDBPreprocessor
 
 git clone https://github.com/qiuqiangkong/audioset_tagging_cnn.git
 cp -r audioset_tagging_cnn/metadata ./
+CHECKPOINT_PATH="Cnn14_mAP=0.431.pth"
 wget -O $CHECKPOINT_PATH https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.431.pth?download=1
 ```
 
