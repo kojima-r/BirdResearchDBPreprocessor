@@ -47,12 +47,22 @@ for path,l in data:
     ofp.write("\t".join([path,l]))
     ofp.write("\n")
 
+ofp=open("label01_mapping.tsv","w")
+ll=list(set([l for _,l in data]))
+for i,l in enumerate(sorted(ll)):
+    ofp.write("\t".join([str(i),l]))
+    ofp.write("\n")
+
+
 count={}
 for path,l in data:
     if l not in count:
         count[l]=0
     count[l]+=1
 
+ofp=open("label01_histo.tsv","w")
 for k,v in sorted(count.items(), key=lambda x: x[1]):
+    ofp.write("\t".join([str(k),str(v)]))
+    ofp.write("\n")
     print(k,v)
 
