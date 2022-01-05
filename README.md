@@ -22,7 +22,7 @@ python 02annotation.py
 - Base model: https://github.com/qiuqiangkong/audioset_tagging_cnn
 
 ```
-git https://github.com/qiuqiangkong/audioset_tagging_cnn.git
+git clone https://github.com/qiuqiangkong/audioset_tagging_cnn.git
 cp -r audioset_tagging_cnn/metadata ./
 ```
 
