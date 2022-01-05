@@ -9,7 +9,7 @@ from joblib import Parallel, delayed
 from tqdm.autonotebook import tqdm
 import glob
 
-fs=32000
+fs=16000
 frame_len = int(100 * fs /1000) # 20ms
 frame_shift = int(5 * fs /1000) # 10ms
 thresh_u=0.01

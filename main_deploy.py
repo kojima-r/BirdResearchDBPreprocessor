@@ -6,14 +6,30 @@ from model import Transfer_Cnn14
 
 
 classes_num=294
+batch_size=4
+
+# 16k
+sample_rate=16000
+window_size=512
+hop_size=160
+mel_bins=64
+fmin=50
+fmax=8000
 model_path="best_models/best_model.pth"
+
+"""
+# 32k
 sample_rate=32000
 window_size=1024
 hop_size=320
 mel_bins=64
 fmin=50
 fmax=14000
-batch_size=4
+pretrain_path="Cnn14_mAP=0.431.pth"
+model_path="best_models/best_model_32k.pth"
+"""
+
+
 
 def pred():
     ## making dummy data

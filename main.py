@@ -13,6 +13,29 @@ from dataset import BirdSongDataset
 from model import Transfer_Cnn14
 
 
+from argparse import ArgumentParser
+
+num_workers=4
+sample_rate=16000
+window_size=512
+hop_size=160
+mel_bins=64
+fmin=50
+fmax=8000
+pretrain_path="Cnn14_16k_mAP=0.438.pth"
+
+"""
+# 32k
+sample_rate=32000
+window_size=1024
+hop_size=320
+mel_bins=64
+fmin=50
+fmax=14000
+pretrain_path="Cnn14_mAP=0.431.pth"
+"""
+
+
 
 class ClassificationTask(pl.LightningModule):
     def __init__(self, model, args):
@@ -83,17 +106,9 @@ class ClassificationTask(pl.LightningModule):
         parser.add_argument("--learning_rate", type=float, default=0.001)
         return parent_parser
 
-
-from argparse import ArgumentParser
-num_workers=4
-sample_rate=32000
-window_size=1024
-hop_size=320
-mel_bins=64
-fmin=50
-fmax=14000
 def get_args():
     parser = ArgumentParser()
+    parser.add_argument("mode",  choices=['train', 'pred', 'test'])
     parser = pl.Trainer.add_argparse_args(parser)
     parser = ClassificationTask.add_model_specific_args(parser)
     subparser = parser.add_argument_group("Other")
@@ -105,8 +120,7 @@ def get_args():
     return args
 
 
-def pred():
-    args = get_args()
+def pred(args):
     dataset = BirdSongDataset()
     n_samples = len(dataset)
     train_size = int(len(dataset) * args.valid_rate)
@@ -127,7 +141,8 @@ def pred():
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
     #model = Transfer_Cnn14.load_from_checkpoint("best_models/sample-epoch=121-val_loss=0.44.ckpt")
     ###
-    task=ClassificationTask.load_from_checkpoint(checkpoint_path="best_models/sample-epoch=121-val_loss=0.44.ckpt",model=model,args=args)
+    ckpt_path="best_models/best_model.ckpt"
+    task=ClassificationTask.load_from_checkpoint(checkpoint_path=ckpt_path,model=model,args=args)
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.test(task, dataloaders=[valid_loader])
     print(trainer.model.model)
@@ -146,8 +161,7 @@ def pred():
             break
 
 
-def train():
-    args = get_args()
+def train(args):
     dataset = BirdSongDataset()
     n_samples = len(dataset)
     train_size = int(len(dataset) * args.valid_rate)
@@ -166,7 +180,7 @@ def train():
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
-    model.load_from_pretrain("Cnn14_mAP=0.431.pth")
+    model.load_from_pretrain(pretrain_path)
     task=ClassificationTask(model,args)
 
     checkpoint_callback = ModelCheckpoint(
@@ -198,12 +212,18 @@ def train():
             ofp.write(str(l1)+"\t"+str(l2)+"\n")
 
     ### save best model
+    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
     task=ClassificationTask.load_from_checkpoint(checkpoint_path="best_models/best_model.ckpt",model=model,args=args)
     trainer = pl.Trainer.from_argparse_args(args)
     model_path="best_models/best_model.pth"
     torch.save(trainer.model.model.to('cpu').state_dict(),model_path )
 
 if __name__ == "__main__":
-    #train()
-    pred()
+    args = get_args()
+    if args.mode=="train":
+        train(args)
+    elif args.mode in ["pred","test"]:
+        pred(args)
+    else:
+        print("Error: unknown mode:",args.mode)
 
