@@ -69,7 +69,7 @@ def main():
     parser.add_argument(
         "--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
     parser.add_argument(
-        "--max_epoch",  type=str, default="1")
+        "--max_epoch",  type=str, default="100")
     args = parser.parse_args()
 
     if args.study_name is None:

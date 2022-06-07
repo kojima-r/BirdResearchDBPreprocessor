@@ -57,3 +57,6 @@ wget -O $CHECKPOINT_PATH https://zenodo.org/record/3987831/files/Cnn14_mAP%3D0.4
 python main.py train --max_epoch 500 --gpus 1 --batch_size 32 --learning_rate 0.001
 ```
 
+```
+python opt.py --gpu 2 --loss_type ce --max_epoch 500
+```
