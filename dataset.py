@@ -34,9 +34,16 @@ class BirdSongDataset(Dataset):
     self.label_mapping=label_mapping
     self.segment = segment
     self.sample_rate = sample_rate
+    #self.count_label()
 
   def __len__(self):
       return len(self.data_list)
+
+  #def count_label(self):
+  #    self.n_per_label={v:0 for v in set(self.label_mapping.values())}
+  #    for path, label in self.data_list:
+  #        l_idx=self.label_mapping[label]
+  #        self.n_per_label[l_idx]+=1
 
   def __getitem__(self, idx):
       # Get the row in dataframe
