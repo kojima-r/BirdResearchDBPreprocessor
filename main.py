@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.optim import Adam
+from torch.optim import Adam, RMSprop, SGD, AdamW
 from torch.utils.data import DataLoader, Subset
 import pytorch_lightning as pl
 import torch.nn.functional as F
@@ -15,6 +15,8 @@ from class_balanced_loss import CB_loss
 
 
 from argparse import ArgumentParser
+import os
+import json
 
 num_workers=4
 sample_rate=16000
@@ -47,16 +49,19 @@ class ClassificationTask(pl.LightningModule):
         self.train_losses=[]
         self.samples_per_cls=samples_per_cls
         self.no_of_classes=no_of_classes
-        self.loss_type='focal'
-        self.loss_beta=0.9999
-        self.loss_gamma=0.0
+        self.loss_type=args.loss_type
+        if args.loss_type!="ce":
+            self.loss_beta=0.9999
+            self.loss_gamma=0.0
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self.model(x)
         ## loss function
-        loss = CB_loss(y, y_hat, self.samples_per_cls, self.no_of_classes, self.loss_type, self.loss_beta, self.loss_gamma, device="cuda")
-        #loss = F.cross_entropy(y_hat, y)
+        if self.loss_type=="ce":
+            loss = F.cross_entropy(y_hat, y)
+        else:
+            loss = CB_loss(y, y_hat, self.samples_per_cls, self.no_of_classes, self.loss_type, self.loss_beta, self.loss_gamma, device="cuda")
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -89,8 +94,10 @@ class ClassificationTask(pl.LightningModule):
     def _shared_eval_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self.model(x)
-        #loss = F.cross_entropy(y_hat, y)
-        loss = CB_loss(y, y_hat, self.samples_per_cls, self.no_of_classes, self.loss_type, self.loss_beta, self.loss_gamma, device="cuda")
+        if self.loss_type=="ce":
+            loss = F.cross_entropy(y_hat, y)
+        else:
+            loss = CB_loss(y, y_hat, self.samples_per_cls, self.no_of_classes, self.loss_type, self.loss_beta, self.loss_gamma, device="cuda")
         acc = accuracy(y_hat, y)
         return loss, acc
 
@@ -101,18 +108,24 @@ class ClassificationTask(pl.LightningModule):
 
     def configure_optimizers(self):
         lr=self.args.learning_rate
+        weight_decay=self.args.weight_decay
         if self.args.optimizer=="adam":
-            return torch.optim.Adam(self.model.parameters(), lr=lr)
+            return torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        elif self.args.optimizer=="adamW":
+            return torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        elif self.args.optimizer=="rmsprop":
+            return torch.optim.RMSprop(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         elif self.args.optimizer=="sgd":
-            return torch.optim.SGD(self.model.parameters(), lr=lr)
+            return torch.optim.SGD(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         else:
             pass
             
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("ClassificationTask")
-        parser.add_argument("--optimizer", type=str, default="adam")
+        parser.add_argument("--optimizer", type=str, choices=['adam', 'adamW', 'rmsprop', 'sgd'], default="adam")
         parser.add_argument("--learning_rate", type=float, default=0.001)
+        parser.add_argument("--weight_decay", type=float, default=0.0)
         return parent_parser
 
 def get_args():
@@ -121,8 +134,13 @@ def get_args():
     parser = pl.Trainer.add_argparse_args(parser)
     parser = ClassificationTask.add_model_specific_args(parser)
     subparser = parser.add_argument_group("Other")
+    subparser.add_argument("--gpu", type=str, default=None)
+    subparser.add_argument("--cpu", action="store_true", default=False)
+    subparser.add_argument("--config", type=str, default=None)
     subparser.add_argument("--batch_size", type=int, default=32)
-    subparser.add_argument("--valid_rate", type=float, default=0.8)
+    subparser.add_argument("--valid_rate", type=float, default=0.2)
+    subparser.add_argument("--result_path", type=str, default=".")
+    subparser.add_argument("--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
     subparser.add_argument("--freeze_base", action="store_true", default=False)
     #subparser.add_argument("--pretrain", action="store_true", default=False)
     args = parser.parse_args()
@@ -138,7 +156,7 @@ def count_n_per_label(dataset,classes_num, pseudo_count=1):
 def pred(args):
     dataset = BirdSongDataset()
     n_samples = len(dataset)
-    train_size = int(len(dataset) * args.valid_rate)
+    train_size = int(len(dataset) * (1-args.valid_rate))
     val_size = n_samples - train_size
 
     train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
@@ -153,20 +171,20 @@ def pred(args):
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
 
-    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
+    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     #model = Transfer_Cnn14.load_from_checkpoint("best_models/sample-epoch=121-val_loss=0.44.ckpt")
     ###
-    ckpt_path="best_models/best_model.ckpt"
+    ckpt_path=args.result_path+"/best_models/best_model.ckpt"
     task=ClassificationTask.load_from_checkpoint(checkpoint_path=ckpt_path,model=model,args=args)
 
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.test(task, dataloaders=[valid_loader])
     print(trainer.model.model)
     #print(trainer.model.model.state_dict())
-    model_path="best_models/best_model.pth"
+    model_path=args.result_path+"/best_models/best_model.pth"
     torch.save(trainer.model.model.to('cpu').state_dict(),model_path )
 
-    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
+    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
     pred_y_all=[]
@@ -186,7 +204,7 @@ def pred(args):
 def train(args):
     dataset = BirdSongDataset()
     n_samples = len(dataset)
-    train_size = int(len(dataset) * args.valid_rate)
+    train_size = int(len(dataset) * (1.0-args.valid_rate))
     val_size = n_samples - train_size
 
     train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
@@ -201,13 +219,13 @@ def train(args):
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
 
-    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
+    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_from_pretrain(pretrain_path)
     task=ClassificationTask(model,args)
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
-        dirpath="best_models/",
+        dirpath=args.result_path+"/best_models/",
         filename="sample-{epoch:02d}-{val_loss:.2f}",
         save_top_k=3,
         mode="min",
@@ -215,7 +233,7 @@ def train(args):
 
     best_checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
-        dirpath="best_models/",
+        dirpath=args.result_path+"/best_models/",
         filename="best_model",
         save_top_k=1,
         mode="min",
@@ -227,18 +245,30 @@ def train(args):
     trainer.fit(task, train_dataloaders=train_loader,val_dataloaders=valid_loader)
 
     ### loss plot
-    print(task.train_losses)
-    print(task.val_losses)
-    with open("loss_log.tsv","w") as ofp:
+    filepath=args.result_path+"/loss_log.tsv"
+    with open(filepath,"w") as ofp:
         for l1,l2 in itertools.zip_longest(task.train_losses,task.val_losses,fillvalue=''):
             ofp.write(str(l1)+"\t"+str(l2)+"\n")
 
     ### save best model
-    model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
-    task=ClassificationTask.load_from_checkpoint(checkpoint_path="best_models/best_model.ckpt",model=model,args=args)
+    #model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
+    checkpoint_path=args.result_path+f"/best_models/best_model.ckpt"
+    #task=ClassificationTask.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
+    task=task.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
+    #trainer = pl.Trainer.from_argparse_args(args)
+    model_path=args.result_path+"/best_models/best_model.pth"
+    #torch.save(trainer.model.model.to('cpu').state_dict(), model_path)
+    torch.save(task.model.to('cpu').state_dict(), model_path)
+
+    # evaluation
     trainer = pl.Trainer.from_argparse_args(args)
-    model_path="best_models/best_model.pth"
-    torch.save(trainer.model.model.to('cpu').state_dict(),model_path )
+    out=trainer.validate(task, dataloaders=[valid_loader])
+    path=args.result_path+"/result_valid.json"
+    print("[save]",path)
+    with open(path, mode="w") as fp:
+        json.dump(out[0], fp)
+    
+    
 
 from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score
@@ -254,7 +284,7 @@ def train_cv(args):
     for fold, (train_valid_index, test_index) in enumerate(kf.split(dummyX)):
         train_valid_dataset = Subset(dataset, train_valid_index)
         test_dataset = Subset(dataset, test_index)
-        train_size = int(len(train_valid_index) * args.valid_rate)
+        train_size = int(len(train_valid_index) * (1.0-args.valid_rate))
         val_size = len(train_valid_index)- train_size
         train_dataset, valid_dataset = torch.utils.data.random_split(train_valid_dataset, [train_size, val_size])
         n_per_label = count_n_per_label(train_valid_dataset, classes_num)
@@ -271,14 +301,14 @@ def train_cv(args):
         valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=False, num_workers=num_workers)
         test_loader  = DataLoader(test_dataset,  batch_size=batch_size, drop_last=False, num_workers=num_workers)
 
-        model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
+        model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
         model.load_from_pretrain(pretrain_path)
         model.to("cuda")
         task=ClassificationTask(model,args,n_per_label,classes_num)
 
         checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
-            dirpath="best_models/",
+            dirpath=args.result_path+"/best_models/",
             filename=f"sample-fold{fold:02d}"+"-{epoch:02d}-{val_loss:.2f}",
             save_top_k=3,
             mode="min",
@@ -286,7 +316,7 @@ def train_cv(args):
 
         best_checkpoint_callback = ModelCheckpoint(
             monitor="val_loss",
-            dirpath="best_models/",
+            dirpath=args.result_path+"/best_models/",
             filename=f"best_model-fold{fold:02d}",
             save_top_k=1,
             mode="min",
@@ -302,26 +332,23 @@ def train_cv(args):
         ### loss plot
         print(task.train_losses)
         print(task.val_losses)
-        with open("loss_log_fold{:02d}.tsv".format(fold),"w") as ofp:
+        filepath=args.result_path+"/loss_log_fold{:02d}.tsv".format(fold)
+        print("[save]", filepath)
+        with open(filepath, "w") as ofp:
             for l1,l2 in itertools.zip_longest(task.train_losses,task.val_losses,fillvalue=''):
                 ofp.write(str(l1)+"\t"+str(l2)+"\n")
 
         ### save best model
-        model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=False)
-        print(f"[load] best_models/best_model-fold{fold:02d}.ckpt")
-        task=ClassificationTask.load_from_checkpoint(checkpoint_path=f"best_models/best_model-fold{fold:02d}.ckpt",model=model,args=args)
+        model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
+        checkpoint_path=args.result_path+f"/best_models/best_model-fold{fold:02d}.ckpt"
+        print("[load]", checkpoint_path)
+        task=ClassificationTask.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
         task.samples_per_cls=n_per_label
         task.no_of_classes=classes_num
-        """
-        print("=====")
-        print(task.samples_per_cls)
-        print(task.no_of_classes)
-        print("=====")
-        """
 
         trainer = pl.Trainer.from_argparse_args(args)
         trainer.test(task, dataloaders=[test_loader])
-        model_path=f"best_models/best_model-fold{fold:02d}.pth"
+        model_path=args.result_path+f"/best_models/best_model-fold{fold:02d}.pth"
         torch.save(trainer.model.model.to('cpu').state_dict(), model_path)
 
         # evaluation
@@ -343,8 +370,9 @@ def train_cv(args):
         for i,idx in enumerate(test_index):
             result.append([fold,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
         print("====")
-    print("[save] result_cv.tsv")
-    with open("result_cv.tsv","w") as ofp:
+    filename=args.result_path+"/result_cv.tsv"
+    print("[save]", filename)
+    with open(filename,"w") as ofp:
         for line in result:
             ofp.write("\t".join(map(str,line[:4])))
             ofp.write("\t")
@@ -353,6 +381,19 @@ def train_cv(args):
 
 if __name__ == "__main__":
     args = get_args()
+    if args.config is not None and args.config!="":
+       fp = open(args.config)
+       config =json.load(fp)
+       for k,v in config.items():
+           setattr(args,k,v)
+    # gpu/cpu
+    if args.cpu:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    elif args.gpu is not None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+        args.gpus=len(args.gpu.split(","))
+    ##
+    os.makedirs(args.result_path, exist_ok=True)
     if args.mode=="train":
         train(args)
     elif args.mode=="train_cv":
