@@ -27,7 +27,7 @@ class BirdSongDataset(Dataset):
       ##
       if os.path.exists(arr[0]):
         data_list.append((arr[0],arr[1]))
-
+    ## read mapping
     for line in open(label_mapping_path):
       arr=line.strip().split("\t")
       if len(arr)>=2:

@@ -26,7 +26,8 @@ mel_bins=64
 fmin=50
 fmax=8000
 pretrain_path="Cnn14_16k_mAP=0.438.pth"
-
+label_path="label01.tsv"
+label_mapping_path="label01_mapping.tsv"
 """
 # 32k
 sample_rate=32000
@@ -36,6 +37,8 @@ mel_bins=64
 fmin=50
 fmax=14000
 pretrain_path="Cnn14_mAP=0.431.pth"
+label_path="label01.tsv"
+label_mapping_path="label01_mapping.tsv"
 """
 
 
@@ -141,6 +144,7 @@ def get_args():
     subparser.add_argument("--valid_rate", type=float, default=0.2)
     subparser.add_argument("--result_path", type=str, default=".")
     subparser.add_argument("--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
+    subparser.add_argument("--segment", type=int, default=1)
     subparser.add_argument("--freeze_base", action="store_true", default=False)
     #subparser.add_argument("--pretrain", action="store_true", default=False)
     args = parser.parse_args()
@@ -154,7 +158,8 @@ def count_n_per_label(dataset,classes_num, pseudo_count=1):
 
 
 def pred(args):
-    dataset = BirdSongDataset(sample_rate=sample_rate)
+    dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
+
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1-args.valid_rate))
     val_size = n_samples - train_size
@@ -202,7 +207,7 @@ def pred(args):
     print("accuracy:",acc)
 
 def train(args):
-    dataset = BirdSongDataset(sample_rate=sample_rate)
+    dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1.0-args.valid_rate))
     val_size = n_samples - train_size
@@ -276,7 +281,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score
 
 def train_cv(args):
-    dataset = BirdSongDataset(sample_rate=sample_rate)
+    dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
     n_samples = len(dataset)
     kf = KFold(n_splits=5,shuffle=True)
     classes_num=len(dataset.label_mapping)
