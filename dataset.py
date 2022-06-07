@@ -14,7 +14,7 @@ class BirdSongDataset(Dataset):
       md_file_path (str): The path to the metadata file.
   """
 
-  def __init__(self, label_path="label01.tsv", sample_rate=32000, segment=1):
+  def __init__(self, label_path="label01.tsv",label_mapping_path="label01_mapping.tsv", sample_rate=32000, segment=1):
     label_mapping={}
     data_list=[]
 
@@ -27,8 +27,13 @@ class BirdSongDataset(Dataset):
       ##
       if os.path.exists(arr[0]):
         data_list.append((arr[0],arr[1]))
-    for i,l in enumerate(sorted(list(label_set))):
-      label_mapping[l]=i
+
+    for line in open(label_mapping_path):
+      arr=line.strip().split("\t")
+      if len(arr)>=2:
+        label_mapping[arr[1]]=int(arr[0])
+    #for i,l in enumerate(sorted(list(label_set))):
+    #  label_mapping[l]=i
     ###
     self.data_list=data_list
     self.label_mapping=label_mapping

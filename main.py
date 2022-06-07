@@ -154,7 +154,7 @@ def count_n_per_label(dataset,classes_num, pseudo_count=1):
 
 
 def pred(args):
-    dataset = BirdSongDataset()
+    dataset = BirdSongDataset(sample_rate=sample_rate)
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1-args.valid_rate))
     val_size = n_samples - train_size
@@ -202,7 +202,7 @@ def pred(args):
     print("accuracy:",acc)
 
 def train(args):
-    dataset = BirdSongDataset()
+    dataset = BirdSongDataset(sample_rate=sample_rate)
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1.0-args.valid_rate))
     val_size = n_samples - train_size
@@ -215,13 +215,15 @@ def train(args):
     
     classes_num=len(dataset.label_mapping)
     batch_size=args.batch_size
+    n_per_label = count_n_per_label(dataset, classes_num)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers)
     valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_from_pretrain(pretrain_path)
-    task=ClassificationTask(model,args)
+    model.to("cuda")
+    task=ClassificationTask(model,args,n_per_label,classes_num)
 
     checkpoint_callback = ModelCheckpoint(
         monitor="val_loss",
@@ -274,7 +276,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import accuracy_score
 
 def train_cv(args):
-    dataset = BirdSongDataset()
+    dataset = BirdSongDataset(sample_rate=sample_rate)
     n_samples = len(dataset)
     kf = KFold(n_splits=5,shuffle=True)
     classes_num=len(dataset.label_mapping)
