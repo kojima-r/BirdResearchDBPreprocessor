@@ -262,6 +262,8 @@ def train(args):
     checkpoint_path=args.result_path+f"/best_models/best_model.ckpt"
     #task=ClassificationTask.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
     task=task.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
+    task.samples_per_cls=n_per_label
+    task.no_of_classes=classes_num
     #trainer = pl.Trainer.from_argparse_args(args)
     model_path=args.result_path+"/best_models/best_model.pth"
     #torch.save(trainer.model.model.to('cpu').state_dict(), model_path)
