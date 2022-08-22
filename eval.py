@@ -1,4 +1,11 @@
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, accuracy_score
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+matplotlib.rc('font', family='Noto Sans CJK JP')
+plt.rcParams["font.size"] = 8
+
+
 filename="label01_mapping.tsv"
 names=[]
 for line in open(filename):
@@ -6,9 +13,12 @@ for line in open(filename):
     names.append(arr[1])
 
 filename="result_cv.tsv"
+#filename="result_focal/result_cv.tsv"
+#filename="result_softmax/result_cv.tsv"
 true_ys=[]
 pred_ys=[]
 target_names=set()
+fold_info={}
 for line in open(filename):
     arr=line.strip().split("\t")
     fold=arr[0]
@@ -18,8 +28,17 @@ for line in open(filename):
     if y!=pred_y:
         target_names.add(names[y])
         target_names.add(names[pred_y])
+    if fold not in fold_info:
+        fold_info[fold]=[]
+    fold_info[fold].append((pred_y,y))
     pred_ys.append(pred_y)
     true_ys.append(y)
+accs=[]
+for k,v in fold_info.items():
+    acc=accuracy_score([e[1] for e in v],[e[0] for e in v])
+    accs.append(acc)
+print("Acc:",np.mean(accs),"(",np.std(accs),")")
+quit()
 
 conf=confusion_matrix(true_ys,pred_ys)
 eval_list=[]
@@ -35,7 +54,6 @@ for el in sorted(eval_list, key=lambda x: x[1] ):
     s="\t".join(map(str,el))
     print(s)
 
-import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import linkage
 from scipy.cluster.hierarchy import dendrogram
 import seaborn as sns

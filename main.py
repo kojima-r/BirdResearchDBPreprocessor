@@ -17,6 +17,7 @@ from class_balanced_loss import CB_loss
 from argparse import ArgumentParser
 import os
 import json
+import pickle
 
 num_workers=4
 sample_rate=16000
@@ -90,9 +91,15 @@ class ClassificationTask(pl.LightningModule):
     
     def test_step(self, batch, batch_idx):
         loss, acc = self._shared_eval_step(batch, batch_idx)
-        metrics = {"test_acc": acc, "test_loss": loss}
+        emb = self._embed_step(batch, batch_idx)
+        metrics = {"test_acc": acc, "test_loss": loss,"embedding": emb}
         self.log_dict(metrics)
         return metrics
+
+    def _embed_step(self, batch, batch_idx):
+        x, y = batch
+        y_dict = self.model.forward_dict(x)
+        return y_dict["embedding"]
 
     def _shared_eval_step(self, batch, batch_idx):
         x, y = batch
@@ -290,6 +297,7 @@ def train_cv(args):
     batch_size=args.batch_size
     dummyX = list(range(n_samples))
     result=[]
+    result_embed=[]
     for fold, (train_valid_index, test_index) in enumerate(kf.split(dummyX)):
         train_valid_dataset = Subset(dataset, train_valid_index)
         test_dataset = Subset(dataset, test_index)
@@ -365,19 +373,23 @@ def train_cv(args):
         pred_y_prob_all=[]
         pred_y_all=[]
         y_all=[]
+        y_embed=[]
         for x,y in test_loader:
             with torch.no_grad():   
                 pred_y_prob = model(x).to('cpu').detach().numpy().copy()
+                pred_dict = model.forward_dict(x)
                 #print(pred_y_prob)
                 #print(pred_y_prob.shape)
                 pred_y = np.argmax(pred_y_prob,axis=1)
                 pred_y_all.extend(pred_y)
                 pred_y_prob_all.extend(pred_y_prob)
                 y_all.extend(y.to('cpu').detach().numpy())
+                y_embed.extend(pred_dict["embedding"])
         acc = accuracy_score(y_all, pred_y_all)
         print("accuracy:",acc)
         for i,idx in enumerate(test_index):
             result.append([fold,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
+        result_embed.append(y_embed)
         print("====")
     filename=args.result_path+"/result_cv.tsv"
     print("[save]", filename)
@@ -387,6 +399,11 @@ def train_cv(args):
             ofp.write("\t")
             ofp.write("\t".join(map(str,line[4])))
             ofp.write("\n")
+    filename=args.result_path+"/result_embed.pkl"
+    print("[save]", filename)
+    with open(filename,"wb") as ofp:
+        pickle.dump(result_embed,ofp)
+     
 
 if __name__ == "__main__":
     args = get_args()

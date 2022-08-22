@@ -36,6 +36,7 @@ for el in data:
     path=el[1]
     dest_path=dest_dir+"/"+audio_id+".wav"
     os.makedirs(dest_dir,exist_ok=True)
-    subprocess.run(["sox",path,"-b","16","-r","32000","-c","1",dest_path,"remix","2"])
+    subprocess.run(["sox",path,"-b","16","-r","16000","-c","1",dest_path,"remix","2"])
+    #subprocess.run(["sox",path,"-b","16","-r","16000","-c","1",dest_path])
 
 
