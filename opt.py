@@ -15,8 +15,12 @@ def objective(trial,src_config,args):
     config["learning_rate"]= trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True)
     config["weight_decay"]= trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True)
     optimizer = trial.suggest_categorical('optimizer', ['sgd', 'adam', 'adamW', 'rmsprop'])
+    aug = trial.suggest_categorical('augumentation', ['none', 'mixup'])
+    if aug=='mixup':
+        config["mixup_alpha"]= trial.suggest_float("mixup_alpha", 1e-3, 10, log=True)
     config["optimizer"]= optimizer
-    config["batch_size"]= trial.suggest_int("batch_size", 8, 256)
+    config["batch_size"]= trial.suggest_int("batch_size", 64, 256, 2)
+    config["loss_type"] = trial.suggest_categorical('loss_type', ['ce', 'focal', 'sigmoid', 'softmax'])
     ##
     os.makedirs(path,exist_ok=True)
     conf_path=args.study_name+"/"+name+"/config.json"
@@ -28,7 +32,7 @@ def objective(trial,src_config,args):
             indent=4,
             sort_keys=True,
         )
-    cmd=["python","main.py","train","--loss_type",args.loss_type,"--max_epochs",args.max_epoch,"--config",conf_path]
+    cmd=["python","main.py","train","--max_epochs",args.max_epoch,"--config",conf_path]
     if args.gpu:
         cmd+=["--gpu",args.gpu]
     print("[EXEC]",cmd)
@@ -40,10 +44,10 @@ def objective(trial,src_config,args):
         result_path=path+"/result_valid.json"
         with open(result_path, "r") as fp:
             result=json.load(fp)
-        score=result["val_loss"]
+        score=1-result["map"]
     except:
         score=1.0e10
-    print("score:",score)
+    print("score(1-mAP):",score)
     return score
 
 def main():
@@ -67,13 +71,11 @@ def main():
         "--gpu", type=str, default=None, help="gpu"
     )
     parser.add_argument(
-        "--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
-    parser.add_argument(
         "--max_epoch",  type=str, default="100")
     args = parser.parse_args()
 
     if args.study_name is None:
-        args.study_name="study_"+str(args.loss_type)+"_"+str(args.max_epoch)
+        args.study_name="study_"+str(args.max_epoch)
     # start
     if os.path.exists(args.db):
         print("[REUSE]",args.db)

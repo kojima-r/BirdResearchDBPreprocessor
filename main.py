@@ -12,14 +12,21 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from dataset import BirdSongDataset
 from model import Transfer_Cnn14
 from class_balanced_loss import CB_loss
-
+from sklearn.model_selection import train_test_split
 
 from argparse import ArgumentParser
 import os
 import json
 import pickle
 
-num_workers=4
+import sys
+sys.path.insert(1, './audioset_tagging_cnn/utils')
+sys.path.insert(1, './audioset_tagging_cnn/pytorch')
+from utilities import Mixup
+from pytorch_utils import do_mixup
+
+
+num_workers=16
 sample_rate=16000
 window_size=512
 hop_size=160
@@ -57,10 +64,21 @@ class ClassificationTask(pl.LightningModule):
         if args.loss_type!="ce":
             self.loss_beta=0.9999
             self.loss_gamma=0.0
+        self.mixup_augmenter=None
+        if args.mixup_alpha is not None:
+            self.mixup_augmenter = Mixup(mixup_alpha=args.mixup_alpha)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self.model(x)
+        mixup_lambda=None
+        if  self.mixup_augmenter is not None:
+            mixup_lambda=self.mixup_augmenter.get_lambda(batch_size=len(x))
+            mixup_lambda=torch.tensor(mixup_lambda, device=torch.device('cuda'), dtype=torch.float32)
+            target=F.one_hot(y, self.no_of_classes)
+            y=do_mixup(target,mixup_lambda)
+
+        y_hat = self.model(x,mixup_lambda=mixup_lambda)
+        #print("train mode:",self.model.base.training)
         ## loss function
         if self.loss_type=="ce":
             loss = F.cross_entropy(y_hat, y)
@@ -148,8 +166,9 @@ def get_args():
     subparser.add_argument("--cpu", action="store_true", default=False)
     subparser.add_argument("--config", type=str, default=None)
     subparser.add_argument("--batch_size", type=int, default=32)
-    subparser.add_argument("--valid_rate", type=float, default=0.2)
+    subparser.add_argument("--valid_rate", type=float, default=0.25)
     subparser.add_argument("--result_path", type=str, default=".")
+    subparser.add_argument("--mixup_alpha", type=float, default=None)
     subparser.add_argument("--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
     subparser.add_argument("--segment", type=int, default=1)
     subparser.add_argument("--freeze_base", action="store_true", default=False)
@@ -163,6 +182,42 @@ def count_n_per_label(dataset,classes_num, pseudo_count=1):
         counter[v.item()]+=1
     return counter
 
+   
+from sklearn.model_selection import StratifiledKFold
+import  sklearn.metrics
+def evaluate(model, data_loader):
+    # evaluation
+    model.eval()
+    pred_y_prob_all=[]
+    pred_y_all=[]
+    y_all=[]
+    y_embed=[]
+    metrics={}
+    for x,y in data_loader:
+        with torch.no_grad():
+            logit=model(x)
+            pred_y_prob = F.softmax(logit,dim=-1).to('cpu').detach().numpy().copy()
+            pred_dict = model.forward_dict(x)
+            #print(pred_y_prob)
+            #print(pred_y_prob.shape)
+            pred_y = np.argmax(pred_y_prob,axis=1)
+            pred_y_all.extend(pred_y)
+            pred_y_prob_all.extend(pred_y_prob)
+            y_all.extend(y.to('cpu').detach().numpy())
+            y_embed.extend(pred_dict["embedding"])
+    metrics["acc"]= sklearn.metrics.accuracy_score(y_all, pred_y_all)
+    true_y_all=np.array(y_all)
+    pred_y_prob_all=np.array(pred_y_prob_all)
+    try:
+        metrics["auc"]= sklearn.metrics.roc_auc_score(true_y_all, pred_y_prob_all, average=None, multi_class='ovr').tolist()
+        metrics["macro_auc"]= sklearn.metrics.roc_auc_score(true_y_all, pred_y_prob_all, average="macro", multi_class='ovr')
+        true_y_all_onehot=np.eye(pred_y_prob_all.shape[1])[true_y_all]
+        metrics["ap"]= sklearn.metrics.average_precision_score(true_y_all_onehot, pred_y_prob_all, average=None).tolist()
+        metrics["map"]= np.mean(metrics["ap"])
+    except ValueError:
+        print("classerror")
+    return true_y_all,pred_y_all, pred_y_prob_all, y_embed, metrics
+
 
 def pred(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
@@ -170,8 +225,10 @@ def pred(args):
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1-args.valid_rate))
     val_size = n_samples - train_size
-
-    train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    labels=dataset.get_labels()
+    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels)
+    train_dataset = torch.utils.data.Subset(dataset, train_idx)
+    valid_dataset = torch.utils.data.Subset(dataset, valid_idx)
     print("#all:",len(dataset))
     print("#train:",len(train_dataset))
     print("#valid:",len(valid_dataset))
@@ -179,15 +236,17 @@ def pred(args):
     
     classes_num=len(dataset.label_mapping)
     batch_size=args.batch_size
+    n_per_label = count_n_per_label(dataset, classes_num)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers,pin_memory=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers,pin_memory=True)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
-    #model = Transfer_Cnn14.load_from_checkpoint("best_models/sample-epoch=121-val_loss=0.44.ckpt")
     ###
     ckpt_path=args.result_path+"/best_models/best_model.ckpt"
     task=ClassificationTask.load_from_checkpoint(checkpoint_path=ckpt_path,model=model,args=args)
+    task.samples_per_cls=n_per_label
+    task.no_of_classes=classes_num
 
     trainer = pl.Trainer.from_argparse_args(args)
     trainer.test(task, dataloaders=[valid_loader])
@@ -198,28 +257,25 @@ def pred(args):
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    model.eval()
-    pred_y_all=[]
-    y_all=[]
-    for x,y in valid_loader:
-        with torch.no_grad():   
-            pred_y_prob = model(x)
-            #print(pred_y_prob)
-            #print(pred_y_prob.shape)
-            pred_y = np.argmax(pred_y_prob,axis=1)
-            pred_y_all.extend(pred_y)
-        y_all.extend(y)
-    from sklearn.metrics import accuracy_score
-    acc=accuracy_score(y_all, pred_y_all)
-    print("accuracy:",acc)
 
+
+    # evaluation
+    _,_,_,_,metrics =evaluate(task.model,valid_loader)
+    path=args.result_path+"/result_valid.test.json"
+    print("[save]",path)
+    with open(path, mode="w") as fp:
+        json.dump(metrics, fp)
+ 
 def train(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
     n_samples = len(dataset)
     train_size = int(len(dataset) * (1.0-args.valid_rate))
     val_size = n_samples - train_size
 
-    train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    labels=dataset.get_labels()
+    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels)
+    train_dataset = torch.utils.data.Subset(dataset, train_idx)
+    valid_dataset = torch.utils.data.Subset(dataset, valid_idx)
     print("#all:",len(dataset))
     print("#train:",len(train_dataset))
     print("#valid:",len(valid_dataset))
@@ -229,8 +285,8 @@ def train(args):
     batch_size=args.batch_size
     n_per_label = count_n_per_label(dataset, classes_num)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers,pin_memory=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers,pin_memory=True)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_from_pretrain(pretrain_path)
@@ -271,40 +327,35 @@ def train(args):
     task=task.load_from_checkpoint(checkpoint_path=checkpoint_path,model=model,args=args)
     task.samples_per_cls=n_per_label
     task.no_of_classes=classes_num
-    #trainer = pl.Trainer.from_argparse_args(args)
     model_path=args.result_path+"/best_models/best_model.pth"
-    #torch.save(trainer.model.model.to('cpu').state_dict(), model_path)
-    torch.save(task.model.to('cpu').state_dict(), model_path)
+    torch.save(task.model.state_dict(), model_path)
 
     # evaluation
-    trainer = pl.Trainer.from_argparse_args(args)
-    out=trainer.validate(task, dataloaders=[valid_loader])
+    _,_,_,_,metrics =evaluate(task.model,valid_loader)
     path=args.result_path+"/result_valid.json"
     print("[save]",path)
     with open(path, mode="w") as fp:
-        json.dump(out[0], fp)
+        json.dump(metrics, fp)
     
     
-
-from sklearn.model_selection import KFold
-from sklearn.metrics import accuracy_score
 
 def train_cv(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
-    n_samples = len(dataset)
-    kf = KFold(n_splits=5,shuffle=True)
+    kf = StratifiledKFold(n_splits=5,shuffle=True)
     classes_num=len(dataset.label_mapping)
     batch_size=args.batch_size
-    dummyX = list(range(n_samples))
+    x_idx = list(range(len(dataset)))
+    labels=np.array(dataset.get_labels())
     result=[]
     result_embed=[]
-    for fold, (train_valid_index, test_index) in enumerate(kf.split(dummyX)):
-        train_valid_dataset = Subset(dataset, train_valid_index)
+    result_metrics=[]
+    for fold, (train_valid_index, test_index) in enumerate(kf.split(x_idx,labels)):
+        train_idx, valid_idx = train_test_split(train_valid_index,test_size=args.valid_rate, stratify=labels[train_valid_index])
+
+        train_dataset = Subset(dataset, train_idx)
+        valid_dataset = Subset(dataset, valid_idx)
         test_dataset = Subset(dataset, test_index)
-        train_size = int(len(train_valid_index) * (1.0-args.valid_rate))
-        val_size = len(train_valid_index)- train_size
-        train_dataset, valid_dataset = torch.utils.data.random_split(train_valid_dataset, [train_size, val_size])
-        n_per_label = count_n_per_label(train_valid_dataset, classes_num)
+        n_per_label = count_n_per_label(train_dataset, classes_num)
 
         print("## fold {}".format(fold))
         print("#all:",    len(dataset))
@@ -368,28 +419,11 @@ def train_cv(args):
         model_path=args.result_path+f"/best_models/best_model-fold{fold:02d}.pth"
         torch.save(trainer.model.model.to('cpu').state_dict(), model_path)
 
-        # evaluation
-        model.eval()
-        pred_y_prob_all=[]
-        pred_y_all=[]
-        y_all=[]
-        y_embed=[]
-        for x,y in test_loader:
-            with torch.no_grad():   
-                pred_y_prob = model(x).to('cpu').detach().numpy().copy()
-                pred_dict = model.forward_dict(x)
-                #print(pred_y_prob)
-                #print(pred_y_prob.shape)
-                pred_y = np.argmax(pred_y_prob,axis=1)
-                pred_y_all.extend(pred_y)
-                pred_y_prob_all.extend(pred_y_prob)
-                y_all.extend(y.to('cpu').detach().numpy())
-                y_embed.extend(pred_dict["embedding"])
-        acc = accuracy_score(y_all, pred_y_all)
-        print("accuracy:",acc)
+        y_all,pred_y_all,pred_y_prob_all, y_embed, metrics=evaluate(model,test_loader)
         for i,idx in enumerate(test_index):
             result.append([fold,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
         result_embed.append(y_embed)
+        result_metrics.append(metrics)
         print("====")
     filename=args.result_path+"/result_cv.tsv"
     print("[save]", filename)
@@ -399,6 +433,12 @@ def train_cv(args):
             ofp.write("\t")
             ofp.write("\t".join(map(str,line[4])))
             ofp.write("\n")
+
+    filename=args.result_path+"/result_cv.json"
+    print("[save]",filename)
+    with open(path, mode="w") as fp:
+        json.dump(result_metrics, fp)
+
     filename=args.result_path+"/result_embed.pkl"
     print("[save]", filename)
     with open(filename,"wb") as ofp:

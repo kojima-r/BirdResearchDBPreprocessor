@@ -44,6 +44,12 @@ class BirdSongDataset(Dataset):
   def __len__(self):
       return len(self.data_list)
 
+  def get_labels(self):
+    labels=[]
+    for path, label in self.data_list:
+      labels.append(label)
+    return labels
+
   #def count_label(self):
   #    self.n_per_label={v:0 for v in set(self.label_mapping.values())}
   #    for path, label in self.data_list:

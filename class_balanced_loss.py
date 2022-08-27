@@ -71,8 +71,10 @@ def CB_loss(labels, logits, samples_per_cls, no_of_classes, loss_type, beta, gam
     effective_num = 1.0 - np.power(beta, samples_per_cls)
     weights = (1.0 - beta) / (np.array(effective_num))
     weights = weights / np.sum(weights) * no_of_classes
-
-    labels_one_hot = F.one_hot(labels, no_of_classes).float().to(device)
+    if labels.shape==logits.shape:
+        labels_one_hot = labels
+    else:
+        labels_one_hot = F.one_hot(labels, no_of_classes).float().to(device)
 
     weights = torch.tensor(weights).float().to(device)
     weights = weights.unsqueeze(0)
@@ -85,7 +87,7 @@ def CB_loss(labels, logits, samples_per_cls, no_of_classes, loss_type, beta, gam
         #print(labels_one_hot, logits, weights, gamma)
         cb_loss = focal_loss(labels_one_hot, logits, weights, gamma)
     elif loss_type == "sigmoid":
-        cb_loss = F.binary_cross_entropy_with_logits(input = logits,target = labels_one_hot, weights = weights)
+        cb_loss = F.binary_cross_entropy_with_logits(input = logits,target = labels_one_hot, weight = weights)
     elif loss_type == "softmax":
         pred = logits.softmax(dim = 1)
         cb_loss = F.binary_cross_entropy(input = pred, target = labels_one_hot, weight = weights)
