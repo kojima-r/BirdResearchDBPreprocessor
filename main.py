@@ -447,7 +447,7 @@ def train_cv(args):
 
     filename=args.result_path+"/result_cv.json"
     print("[save]",filename)
-    with open(path, mode="w") as fp:
+    with open(filename, mode="w") as fp:
         json.dump(result_metrics, fp)
 
     filename=args.result_path+"/result_embed.pkl"
