@@ -171,6 +171,7 @@ def get_args():
     subparser.add_argument("--mixup_alpha", type=float, default=None)
     subparser.add_argument("--loss_type",   choices=['ce', 'focal', 'sigmoid', 'softmax'],default="ce")
     subparser.add_argument("--segment", type=int, default=1)
+    subparser.add_argument("--fold", type=int, default=3)
     subparser.add_argument("--freeze_base", action="store_true", default=False)
     #subparser.add_argument("--pretrain", action="store_true", default=False)
     args = parser.parse_args()
@@ -348,7 +349,7 @@ def train(args):
 
 def train_cv(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
-    kf = StratifiedKFold(n_splits=5,shuffle=True,random_state=0)
+    kf = StratifiedKFold(n_splits=args.fold,shuffle=True,random_state=0)
     classes_num=len(dataset.label_mapping)
     batch_size=args.batch_size
     x_idx = list(range(len(dataset)))
