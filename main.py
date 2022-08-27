@@ -183,9 +183,9 @@ def count_n_per_label(dataset,classes_num, pseudo_count=1):
     return counter
 
    
-from sklearn.model_selection import StratifiledKFold
+from sklearn.model_selection import StratifiedKFold
 import  sklearn.metrics
-def evaluate(model, data_loader):
+def evaluate(model, data_loader,add_noise_snr=None):
     # evaluation
     model.eval()
     pred_y_prob_all=[]
@@ -195,11 +195,18 @@ def evaluate(model, data_loader):
     metrics={}
     for x,y in data_loader:
         with torch.no_grad():
-            logit=model(x)
+            if add_noise_snr is not None:
+                noise_src = torch.randn_like(x)
+                src_rms = x.norm(p=2,dim=1,keepdim=True)
+                noise_rms = noise_src.norm(p=2,dim=1,keepdim=True)
+                snr = 10 ** (add_noise_snr / 20)
+                scale = snr * noise_rms / src_rms
+                noisy_x=(scale * x + noise_src) / 2
+                logit=model(noisy_x)
+            else:
+                logit=model(x)
             pred_y_prob = F.softmax(logit,dim=-1).to('cpu').detach().numpy().copy()
             pred_dict = model.forward_dict(x)
-            #print(pred_y_prob)
-            #print(pred_y_prob.shape)
             pred_y = np.argmax(pred_y_prob,axis=1)
             pred_y_all.extend(pred_y)
             pred_y_prob_all.extend(pred_y_prob)
@@ -226,7 +233,7 @@ def pred(args):
     train_size = int(len(dataset) * (1-args.valid_rate))
     val_size = n_samples - train_size
     labels=dataset.get_labels()
-    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels)
+    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels,random_state=0)
     train_dataset = torch.utils.data.Subset(dataset, train_idx)
     valid_dataset = torch.utils.data.Subset(dataset, valid_idx)
     print("#all:",len(dataset))
@@ -273,7 +280,7 @@ def train(args):
     val_size = n_samples - train_size
 
     labels=dataset.get_labels()
-    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels)
+    train_idx, valid_idx = train_test_split(list(range(len(labels))),shuffle=True, test_size=val_size, train_size=train_size, stratify=labels,random_state=0)
     train_dataset = torch.utils.data.Subset(dataset, train_idx)
     valid_dataset = torch.utils.data.Subset(dataset, valid_idx)
     print("#all:",len(dataset))
@@ -341,7 +348,7 @@ def train(args):
 
 def train_cv(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
-    kf = StratifiledKFold(n_splits=5,shuffle=True)
+    kf = StratifiedKFold(n_splits=5,shuffle=True,random_state=0)
     classes_num=len(dataset.label_mapping)
     batch_size=args.batch_size
     x_idx = list(range(len(dataset)))
@@ -350,7 +357,7 @@ def train_cv(args):
     result_embed=[]
     result_metrics=[]
     for fold, (train_valid_index, test_index) in enumerate(kf.split(x_idx,labels)):
-        train_idx, valid_idx = train_test_split(train_valid_index,test_size=args.valid_rate, stratify=labels[train_valid_index])
+        train_idx, valid_idx = train_test_split(train_valid_index,test_size=args.valid_rate, stratify=labels[train_valid_index],random_state=0)
 
         train_dataset = Subset(dataset, train_idx)
         valid_dataset = Subset(dataset, valid_idx)
@@ -423,7 +430,11 @@ def train_cv(args):
         for i,idx in enumerate(test_index):
             result.append([fold,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
         result_embed.append(y_embed)
-        result_metrics.append(metrics)
+        res_m={"clean":metrics}
+        for snr in [-20,-10,0,10,20]:
+            y_all,pred_y_all,pred_y_prob_all, y_embed, metrics=evaluate(model,test_loader,add_noise_snr=snr)
+            res_m[str(snr)]=metrics
+        result_metrics.append(res_m)
         print("====")
     filename=args.result_path+"/result_cv.tsv"
     print("[save]", filename)
