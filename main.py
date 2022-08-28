@@ -294,7 +294,7 @@ def train(args):
     n_per_label = count_n_per_label(dataset, classes_num)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers,pin_memory=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers,pin_memory=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=False, num_workers=num_workers,pin_memory=True)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     model.load_from_pretrain(pretrain_path)
