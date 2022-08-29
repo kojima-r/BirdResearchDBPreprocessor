@@ -214,16 +214,25 @@ def evaluate(model, data_loader,add_noise_snr=None):
             y_all.extend(y.to('cpu').detach().numpy())
             y_embed.extend(pred_dict["embedding"])
     metrics["acc"]= sklearn.metrics.accuracy_score(y_all, pred_y_all)
+    print(y_all)
+    print(pred_y_prob_all)
     true_y_all=np.array(y_all)
     pred_y_prob_all=np.array(pred_y_prob_all)
-    try:
-        metrics["auc"]= sklearn.metrics.roc_auc_score(true_y_all, pred_y_prob_all, average=None, multi_class='ovr').tolist()
-        metrics["macro_auc"]= sklearn.metrics.roc_auc_score(true_y_all, pred_y_prob_all, average="macro", multi_class='ovr')
-        true_y_all_onehot=np.eye(pred_y_prob_all.shape[1])[true_y_all]
-        metrics["ap"]= sklearn.metrics.average_precision_score(true_y_all_onehot, pred_y_prob_all, average=None).tolist()
-        metrics["map"]= np.mean(metrics["ap"])
-    except ValueError:
-        print("classerror")
+    true_y_all_onehot=np.eye(pred_y_prob_all.shape[1])[true_y_all]
+    metrics["auc"]=[]
+    metrics["ap"] =[] 
+    for l in range(pred_y_prob_all.shape[1]):
+        try:
+            auc = sklearn.metrics.roc_auc_score(true_y_all==l, pred_y_prob_all[:,l])
+            ap  = sklearn.metrics.average_precision_score(true_y_all==l, pred_y_prob_all[:,l])
+            metrics["ap"].append(ap)
+            metrics["auc"].append(auc)
+        except ValueError:
+            metrics["ap"].append(np.nan)
+            metrics["auc"].append(np.nan)
+            print("classerror:",l)
+    metrics["map"]= np.nanmean(metrics["ap"])
+    metrics["macro_auc"]= np.nanmean(metrics["auc"])
     return true_y_all,pred_y_all, pred_y_prob_all, y_embed, metrics
 
 
@@ -247,7 +256,7 @@ def pred(args):
     n_per_label = count_n_per_label(dataset, classes_num)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, drop_last=True, shuffle=True, num_workers=num_workers,pin_memory=True)
-    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=True, num_workers=num_workers,pin_memory=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=batch_size, drop_last=False, num_workers=num_workers,pin_memory=True)
 
     model = Transfer_Cnn14(sample_rate, window_size, hop_size, mel_bins, fmin, fmax, classes_num, freeze_base=args.freeze_base)
     ###
@@ -268,11 +277,34 @@ def pred(args):
 
 
     # evaluation
-    _,_,_,_,metrics =evaluate(task.model,valid_loader)
+    y_all,pred_y_all,pred_y_prob_all, y_embed, metrics =evaluate(task.model,valid_loader)
     path=args.result_path+"/result_valid.test.json"
     print("[save]",path)
     with open(path, mode="w") as fp:
         json.dump(metrics, fp)
+    ################
+    result=[]
+    for i,idx in enumerate(valid_idx):
+        result.append([0,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
+    filename=args.result_path+"/result_valid.test.tsv"
+    print("[save]", filename)
+    with open(filename,"w") as ofp:
+        for line in result:
+            ofp.write("\t".join(map(str,line[:4])))
+            ofp.write("\t")
+            ofp.write("\t".join(map(str,line[4])))
+            ofp.write("\n")
+    ################
+    res_m={"clean":metrics}
+    for snr in [-20,-10,0,10,20]:
+        y_all,pred_y_all,pred_y_prob_all, y_embed, metrics=evaluate(task.model,valid_loader,add_noise_snr=snr)
+        res_m[str(snr)]=metrics
+    print("====")
+    path=args.result_path+"/result_valid.test_noise.json"
+    print("[save]",path)
+    with open(path, mode="w") as fp:
+        json.dump(res_m, fp)
+    
  
 def train(args):
     dataset = BirdSongDataset(sample_rate=sample_rate, label_path=label_path, label_mapping_path=label_mapping_path, segment=args.segment)
@@ -339,12 +371,36 @@ def train(args):
     torch.save(task.model.state_dict(), model_path)
 
     # evaluation
-    _,_,_,_,metrics =evaluate(task.model,valid_loader)
+    y_all,pred_y_all,pred_y_prob_all, y_embed,metrics =evaluate(task.model,valid_loader)
     path=args.result_path+"/result_valid.json"
     print("[save]",path)
     with open(path, mode="w") as fp:
         json.dump(metrics, fp)
+    ################
+    result=[]
+    for i,idx in enumerate(valid_idx):
+        result.append([0,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
+    filename=args.result_path+"/result_valid.tsv"
+    print("[save]", filename)
+    with open(filename,"w") as ofp:
+        for line in result:
+            ofp.write("\t".join(map(str,line[:4])))
+            ofp.write("\t")
+            ofp.write("\t".join(map(str,line[4])))
+            ofp.write("\n")
+    ################
+    res_m={"clean":metrics}
+    for snr in [-20,-10,0,10,20]:
+        y_all,pred_y_all,pred_y_prob_all, y_embed,metrics =evaluate(task.model,valid_loader,add_noise_snr=snr)
+        res_m[str(snr)]=metrics
+    print("====")
+    path=args.result_path+"/result_valid.noise.json"
+    print("[save]",path)
+    with open(path, mode="w") as fp:
+        json.dump(res_m, fp)
     
+
+
     
 
 def train_cv(args):

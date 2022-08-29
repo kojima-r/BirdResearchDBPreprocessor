@@ -32,7 +32,7 @@ def objective(trial,src_config,args):
             indent=4,
             sort_keys=True,
         )
-    cmd=["python","main.py","train","--max_epochs",args.max_epoch,"--config",conf_path,"--enable_progress_bar","False"]
+    cmd=["python","main.py","train","--max_epochs",args.max_epoch,"--config",conf_path,"--enable_progress_bar","False","--valid_rate","0.1"]
     if args.gpu:
         cmd+=["--gpu",args.gpu]
     print("[EXEC]",cmd)
