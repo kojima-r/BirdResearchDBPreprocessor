@@ -214,8 +214,6 @@ def evaluate(model, data_loader,add_noise_snr=None):
             y_all.extend(y.to('cpu').detach().numpy())
             y_embed.extend(pred_dict["embedding"])
     metrics["acc"]= sklearn.metrics.accuracy_score(y_all, pred_y_all)
-    print(y_all)
-    print(pred_y_prob_all)
     true_y_all=np.array(y_all)
     pred_y_prob_all=np.array(pred_y_prob_all)
     true_y_all_onehot=np.eye(pred_y_prob_all.shape[1])[true_y_all]
