@@ -294,7 +294,7 @@ def pred(args):
             ofp.write("\n")
     ################
     res_m={"clean":metrics}
-    for snr in [-20,-10,0,10,20]:
+    for snr in [0,20,40,60,80]:
         y_all,pred_y_all,pred_y_prob_all, y_embed, metrics=evaluate(task.model,valid_loader,add_noise_snr=snr)
         res_m[str(snr)]=metrics
     print("====")
@@ -388,7 +388,7 @@ def train(args):
             ofp.write("\n")
     ################
     res_m={"clean":metrics}
-    for snr in [-20,-10,0,10,20]:
+    for snr in [0,20,40,60,80]:
         y_all,pred_y_all,pred_y_prob_all, y_embed,metrics =evaluate(task.model,valid_loader,add_noise_snr=snr)
         res_m[str(snr)]=metrics
     print("====")
@@ -486,7 +486,7 @@ def train_cv(args):
             result.append([fold,idx,y_all[i],pred_y_all[i], pred_y_prob_all[i]])
         result_embed.append(y_embed)
         res_m={"clean":metrics}
-        for snr in [-20,-10,0,10,20]:
+        for snr in [0,20,40,60,80]:
             y_all,pred_y_all,pred_y_prob_all, y_embed, metrics=evaluate(model,test_loader,add_noise_snr=snr)
             res_m[str(snr)]=metrics
         result_metrics.append(res_m)
