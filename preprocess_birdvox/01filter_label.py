@@ -10,7 +10,7 @@ for l in open("label01.tsv"):
 print(cnt)
 print(len(cnt))
 
-with open("label01_mapping.tsv","w") as fp:
+with open("label01_mapping.filter14.tsv","w") as fp:
     for i,k in enumerate(sorted(cnt.keys())):
         fp.write("\t".join([str(i),k]))
         fp.write("\n")
@@ -19,7 +19,7 @@ with open("label01.filter14.tsv","w") as fp:
     for l in open("label01.tsv"):
         arr=l.strip().split("\t")
         k=arr[1]
-        if k in cnt and  cnt[k]>=10:
+        if k in cnt:
             fp.write("\t".join(arr))
             fp.write("\n")
 
