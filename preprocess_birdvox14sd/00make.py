@@ -33,7 +33,7 @@ for filename in glob.glob("./data_org/*.h5"):
                 sf.write(filepath, w, sr, format=_format, subtype=subtype)
                 """
 
-fp=open("label01.tsv","w")
+fp=open("label01.org.tsv","w")
 for k,v in labels.items():
     fp.write("\t".join([k,v]))
     fp.write("\n")
