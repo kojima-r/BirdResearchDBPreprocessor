@@ -12,7 +12,7 @@ for line in open(filename):
     arr=line.strip().split("\t")
     names.append(arr[1])
 
-filename="result_cv.tsv"
+filename="result_opt/result_cv.tsv"
 #filename="result_focal/result_cv.tsv"
 #filename="result_softmax/result_cv.tsv"
 true_ys=[]
@@ -38,7 +38,6 @@ for k,v in fold_info.items():
     acc=accuracy_score([e[1] for e in v],[e[0] for e in v])
     accs.append(acc)
 print("Acc:",np.mean(accs),"(",np.std(accs),")")
-quit()
 
 conf=confusion_matrix(true_ys,pred_ys)
 eval_list=[]
