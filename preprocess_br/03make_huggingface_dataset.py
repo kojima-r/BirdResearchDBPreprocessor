@@ -35,13 +35,13 @@ def make_dataset(input_label,input_label_mapping,output_path,limit_length):
         fp.write("\n")
         for filename,label,desc in data:
             name=os.path.basename(filename)
-            shutil.copyfile(filename, path+"/data01/"+name)
+            shutil.copyfile(filename, path+"data01/"+name)
             fp.write(",".join(map(str,[name,label,desc])))
             fp.write("\n")
 
     dataset = datasets.load_dataset(path, data_dir="data01")
     print(dataset["train"][0])
-    dataset.push_to_hub("kojima-r/birdjpbook")
+    dataset.push_to_hub("kojima-r/birdbr")
 
 
 def main():
